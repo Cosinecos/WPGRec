@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wpgrec"
+version = "0.1.0"
+description = "Wavelet Packet Guided Graph Enhanced Sequential Recommendation (WPGRec)"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{name="Anonymous"}]
+license = {text="MIT"}
+dependencies = [
+  "torch>=2.0",
+  "numpy>=1.23",
+  "pyyaml>=6.0",
+  "pywavelets>=1.4",
+  "tqdm>=4.66"
+]
+
+[project.scripts]
+wpgrec-train = "wpgrec.cli.train:main"
+wpgrec-eval = "wpgrec.cli.eval:main"
+wpgrec-preprocess = "wpgrec.cli.preprocess:main"
