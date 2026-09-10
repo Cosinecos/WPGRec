@@ -1,83 +1,140 @@
-# WPGRec: Wavelet Packet Guided Graph-Enhanced Sequential Recommendation
+# WPGRec: Wavelet Packet Guided Graph Enhanced Sequential Recommendation
 
-> **Acknowledgement.**  
-> We thank the reviewers, the community, and open-source contributors for their constructive feedback and long-term support of sequential recommendation research. We release this repository to facilitate reproducibility and further exploration. If you use this codebase in your research or production, please feel free to open issues or submit pull requests.
+WPGRec (Wavelet Packet Guided Graph Enhanced Sequential Recommendation) is a multi-resolution framework for sequential recommendation. It combines time-frequency decomposition, scale-consistent graph propagation, and adaptive subband fusion to model user interests at different temporal scales.
 
-This repository provides the **official PyTorch implementation** of **WPGRec (Wavelet Packet Guided Graph-Enhanced Sequential Recommendation)**, reproducing the core model components and the training/evaluation pipeline described in our paper. WPGRec targets **sequential recommendation**: given a user’s historical interaction sequence, it learns user preference representations and predicts the next most likely item.
+## Background
 
----
+Sequential recommendation aims to predict a user’s next interaction based on their historical interaction sequence.
 
-## Paper Overview
+Real-world user behavior sequences usually contain preference signals at multiple temporal scales, including short-term interest fluctuations, periodic behavior patterns, and relatively stable long-term preferences. Traditional sequential models generally encode these signals within a single representation space, which may make it difficult to distinguish interest variations across different temporal scales.
 
-A key challenge in sequential recommendation is that user behavior sequences contain **multi-scale preference signals** (e.g., short-term interest fluctuations, periodic patterns, and long-term stable preferences), and these signals are coupled with the global structure of the user–item interaction graph. Pure sequence encoders may fail to fully capture patterns at different temporal scales, while graph-only propagation can dilute local dynamics within sequences.
+Meanwhile, user-item interactions naturally form a user-item graph containing high-order collaborative information beyond individual behavior sequences. Therefore, an effective sequential recommendation model should not only capture user interests at multiple temporal scales but also incorporate graph-structured information without disrupting the temporal structure of the sequence.
 
-WPGRec views user sequences as **multi-resolution signals**. It applies **wavelet packet decomposition** to split sequence representations into multiple **equal-length, aligned subband components**, models both sequential and graph information **at the subband level**, and then performs adaptive fusion. This design helps preserve:
-- local / short-term dynamics (high-frequency subbands),
-- mid-term trends (mid-frequency subbands),
-- long-term stable preference components (low-frequency subbands).
+From a multi-resolution signal modeling perspective, WPGRec decomposes user behavior sequences into multiple equal-length subbands, performs temporal aggregation and graph propagation independently within each subband, and finally combines the resulting representations through an adaptive gating mechanism.
 
----
+## Model Architecture
 
-## Method at a Glance
+WPGRec consists of the following components.
 
-WPGRec consists of three main parts:
+### 1. Full-Tree Stationary Wavelet Packet Decomposition
 
-### 1) Full-Tree SWPT Decomposition (Sequence → Multi-Resolution Subbands)
+WPGRec first applies boundary processing to the embedding representation of each user behavior sequence. Symmetric extension and learnable boundary tokens are employed to mitigate boundary distortions caused by finite-length sequences during wavelet decomposition.
 
-We apply the **Stationary Wavelet Packet Transform (SWPT)** with a **full-tree** decomposition to sequence features, producing multiple subband representations that are **equal-length** and **shift-invariant**. Compared to downsampling-based wavelet packet transforms, SWPT preserves sequence length and improves alignment stability, which is well-suited for position-aligned modeling in sequential recommendation.
+The model then applies a full-tree Stationary Wavelet Packet Transform (SWPT) along the temporal dimension.
 
-To mitigate boundary artifacts, we use:
-- **symmetric extension**, and
-- **learnable boundary tokens** (to absorb spurious boundary signals).
+Unlike conventional wavelet packet transforms involving downsampling, SWPT produces subbands with equal sequence lengths and shift-invariant properties. Consequently, temporal positions remain aligned across different resolutions, providing a stable foundation for subsequent subband-level graph propagation and fusion.
 
-Each subband corresponds to a specific temporal scale / frequency component and serves as input for subband-level modeling.
+Different subbands represent user interests at different temporal scales and frequency ranges, including:
 
-### 2) Per-Subband Sequence Aggregation (Per-Subband Attention)
+- Relatively stable long-term interests;
+- Behavioral variations over intermediate time ranges;
+- Local and short-term interest fluctuations.
 
-For each subband, we adopt a lightweight **additive attention** module to aggregate the time steps into a subband-specific user representation. Different subbands may emphasize different key positions; per-subband attention enables scale-specific selection of informative segments.
+### 2. Per-Subband Sequence Aggregation
 
-### 3) Band-Consistent Graph Propagation (Per-Subband Chebyshev Propagation)
+For each wavelet subband, WPGRec employs an independent additive attention mechanism to aggregate information across temporal positions.
 
-We perform graph enhancement on the user–item interaction graph using **Chebyshev polynomial spectral propagation**. Importantly, propagation is **band-consistent**: each subband is associated with its own propagation branch, allowing graph information to be injected and modulated independently across different sequence scales.
+The attention module assigns weights according to the importance of different positions and aggregates the sequential features within each subband into a scale-specific user representation. Different subbands can focus on different informative interactions, enabling the model to learn user representations with distinct temporal characteristics.
 
----
+### 3. Band-Consistent Graph Propagation
 
-## Adaptive Fusion (Energy–Spectral-Flatness Gated Fusion)
+WPGRec constructs a bipartite user-item graph from the training interactions and performs graph propagation independently within each subband.
 
-Subband-level representations are fused into the final user embedding. WPGRec uses **energy** and **spectral flatness** as gating signals to modulate each subband’s contribution:
-- energy measures signal strength,
-- spectral flatness reflects how “noise-like” (uniform) versus structured a subband is.
+The graph propagation module employs Chebyshev-polynomial-based spectral graph filtering to inject high-order collaborative information into user and item representations at different scales.
 
-This gated fusion allows the model to emphasize the most informative scales adaptively across users and datasets.  
-For items, we use **uniform averaging** for fusion by default (consistent with the paper setting).
+Unlike methods that first mix all temporal scales and then introduce graph information uniformly, WPGRec performs graph propagation independently within each subband. This keeps the temporal decomposition scale consistent with the graph enhancement scale and reduces interference among different frequency components.
 
----
+### 4. Energy and Spectral-Flatness-Aware Gated Fusion
+
+After subband-level graph propagation, the representations from multiple scales are combined into the final user representation.
+
+WPGRec uses subband energy and the Spectral Flatness Measure (SFM) as gating signals:
+
+- Subband energy describes the signal strength of each frequency component;
+- Spectral flatness indicates whether a subband is more structured or noise-like.
+
+A learnable gating network calculates the fusion weight of each subband. This mechanism assigns larger weights to informative subbands while reducing the influence of noise-like components on the final prediction.
+
+Adaptive weighted fusion is used on the user side, while item representations from different subbands are combined through uniform averaging by default.
+
+### 5. Prediction and Optimization
+
+After cross-subband fusion, the model obtains the final user and item representations and predicts the user’s next interaction based on their matching scores.
+
+The model is trained using full-softmax cross-entropy without sampled negatives. During evaluation, each ground-truth item is ranked against the complete candidate item set, excluding items already observed in the user’s training history.
+
+The primary evaluation metrics include:
+
+- HR@10;
+- HR@20;
+- NDCG@10;
+- NDCG@20.
+
+A concise mapping between the model components and the corresponding equations in the paper is provided in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Contributions
 
-Our main contributions can be summarized as follows:
+1. We propose a multi-resolution framework for sequential recommendation that explicitly decomposes user interests at different temporal scales using a full-tree Stationary Wavelet Packet Transform.
 
-1. **A multi-resolution sequential modeling framework**: we use full-tree SWPT to explicitly decompose preference signals into multiple subbands and learn representations at the subband level.  
-2. **A subband-level graph enhancement mechanism**: we introduce band-consistent Chebyshev spectral propagation on the user–item graph to inject structural information independently at each scale.  
-3. **Interpretable gated fusion**: we design an energy–spectral-flatness gating scheme to enable controllable and diagnosable subband fusion.
+2. We introduce a band-consistent graph propagation mechanism that independently incorporates high-order collaborative information from the user-item graph at different temporal scales.
 
----
+3. We design an energy and spectral-flatness-aware gated fusion mechanism that adaptively selects informative subbands and suppresses noise-like components.
 
-## Features
+## Data Preprocessing
 
-- Full-tree **SWPT**: equal-length, shift-invariant subbands
-- Symmetric extension + **learnable boundary tokens**
-- **Per-subband additive attention** for sequence aggregation
-- **Per-subband Chebyshev** spectral propagation for graph enhancement
-- Energy + spectral flatness **gated fusion** (user side), uniform averaging for item fusion
-- Full-ranking evaluation: HR@K / NDCG@K, excluding training-history items from candidates
+The data preprocessing utility accepts interaction records containing user IDs, item IDs, and timestamps. It performs ID remapping and chronological sorting of the interaction records.
 
----
+The expected input format is:
 
-## Installation
+```text
+user_id    item_id    timestamp
+```
+
+Install the data preprocessing utility with:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+
 pip install -U pip
 pip install -e .
+```
+
+Run preprocessing with:
+
+```bash
+wpgrec-preprocess \
+  --in_path path/to/interactions.tsv \
+  --out_dir path/to/processed_data \
+  --u_col 0 \
+  --i_col 1 \
+  --t_col 2
+```
+
+If the input file contains a header, add:
+
+```bash
+--has_header
+```
+
+The processed interaction records and corresponding dataset statistics will be saved in the specified output directory.
+
+## Citation
+
+If you find this work useful in your research, please cite:
+
+```bibtex
+@inproceedings{liu2026wpgrec,
+  title     = {WPGRec: Wavelet Packet Guided Graph Enhanced Sequential Recommendation},
+  author    = {Liu, Peilin and Ji, Zhiquan and Yan, Gang},
+  booktitle = {Proceedings of the 49th International ACM SIGIR Conference on Research and Development in Information Retrieval},
+  year      = {2026},
+  doi       = {10.1145/3805712.3809907}
+}
+```
+
+## License
+
+This project is released under the MIT License.
+
+> **Note:** The complete model implementation and detailed reproduction instructions are currently being organized and will be released in this repository soon.
